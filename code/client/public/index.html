@@ -1,0 +1,272 @@
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+<script src="/socket.io/socket.io.js"></script>
+
+<div>
+  <canvas id="game" width="1152" height="648" style="border: 1px solid black" tabindex="1"></canvas>
+</div>
+
+<script>
+
+  var self = this;
+
+  var socket = io();
+
+  let canvas = document.getElementById("game");
+  let context = canvas.getContext("2d");
+  var debug = true;
+  var bodyArray = [];
+
+
+  clamp = (val, min, max) => {
+    if (val < min) return min;
+    if (val > max) return max;
+    return val;
+  }
+
+  class Rectangle {
+    constructor(x, y, width, height) {
+      this.x = x;
+      this.y = y;
+      this.width = width;
+      this.height = height;
+    }
+  }
+
+  class StaticBody extends Rectangle {
+    constructor(x, y, width, height) {
+      super(x, y, width, height);
+      this.body = new Rectangle(x, y, width, height);
+      bodyArray.push(this);
+    }
+
+    isOverlapping(otherBody) {
+      return !(this.body.x + this.body.width <= otherBody.x || this.body.y + this.body.height <= otherBody.y || this.body.x >= otherBody.x + otherBody.width || this.body.y >= otherBody.y + otherBody.height);
+    }
+
+    updateStaticBody() {
+      if (debug) {
+        context.globalAlpha = 0.5;
+        context.strokeStyle = '#D000D0';
+        context.lineWidth = 5;
+        context.strokeRect(this.body.x, this.body.y, this.body.width, this.body.height);
+        context.globalAlpha = 1;
+      }
+    }
+  }
+
+  class Body extends StaticBody {
+    constructor(x, y, width, height) {
+      super(x, y, width, height);
+      this.velX = 0;
+      this.velY = 0;
+    }
+
+    updateBody() {
+      this.body.x = this.x;
+      this.body.y = this.y;
+      this.body.width = this.width;
+      this.body.height = this.height;
+
+      this.velY += 0.70;
+
+      // Vertical collision
+      this.body.y += this.velY;
+      if (this.body.y + this.body.height >= canvas.height) {
+        this.body.y -= this.velY;
+        while (this.body.y + this.body.height < canvas.height) this.body.y += Math.sign(this.velY) * 0.00001;
+        this.body.y -= Math.sign(this.velY) * 0.00001;
+        this.velY = 0;
+        this.y = this.body.y;
+      }
+
+      bodyArray.forEach((otherBody) => {
+        if (otherBody != this)
+          if (this.isOverlapping(otherBody)) {
+            this.body.y -= this.velY;
+            while (!this.isOverlapping(otherBody)) this.body.y += Math.sign(this.velY) * 0.00001;
+            this.body.y -= Math.sign(this.velY) * 0.00001;
+            this.velY = 0;
+            this.y = this.body.y;
+          }
+      });
+
+      // Horizontal collision
+      this.body.x += this.velX;
+      if (this.body.x + this.body.width >= canvas.width) {
+        this.body.x -= this.velX;
+        while (this.body.x + this.body.width < canvas.width) this.body.x += Math.sign(this.velX) * 0.00001;
+        this.body.x -= Math.sign(this.velX) * 0.00001;
+        this.velX = 0;
+        this.x = this.body.x;
+      }
+
+      if (this.body.x <= 0) {
+        this.body.x -= this.velX;
+        while (this.body.x > 0) this.body.x += Math.sign(this.velX) * 0.00001;
+        this.body.x -= Math.sign(this.velX) * 0.00001;
+        this.velX = 0;
+        this.x = parseInt(this.body.x);
+      }
+
+      bodyArray.forEach((otherBody) => {
+        if (otherBody != this)
+          if (this.isOverlapping(otherBody)) {
+            this.body.x -= this.velX;
+            while (!otherBody.isOverlapping(otherBody)) this.body.x += Math.sign(this.velX) * 0.00001;
+            this.body.x -= Math.sign(this.velX) * 0.00001;
+            this.velX = 0;
+            this.x = this.body.x;
+          }
+      });
+
+      this.x += this.velX;
+      this.y += this.velY;
+
+      this.updateStaticBody();
+    }
+  }
+
+  class Wall extends StaticBody {
+    constructor(x, y, width, height, color) {
+      super(x, y, width, height);
+      this.color = color;
+    }
+
+    update() {
+      this.updateStaticBody();
+      context.fillStyle = this.color;
+      context.fillRect(this.x, this.y, this.width, this.height);
+    }
+  }
+
+  class Player extends Body {
+    constructor(x, y, width, height, color) {
+      super(x, y, width, height)
+      this.color = color;
+
+      this.keyLeft = false;
+      this.keyRight = false;
+      this.keyUp = false;
+      this.keyDown = false;
+    }
+
+    update() {
+      if (this.keyLeft) {
+        this.velX -= 0.75;
+        this.velX = clamp(this.velX, -15, 0);
+      } else if (this.keyRight) {
+        this.velX += 0.75;
+        this.velX = clamp(this.velX, 0, 15);
+      } else {
+        this.velX = 0;
+      }
+      if (this.keyLeft && this.keyRight)
+        this.velX = 0;
+
+      if (this.keyUp) {
+        this.body.height += 1;
+        if (this.body.y + this.body.height >= canvas.height) {
+          this.velY = -20;
+        }
+        else {
+          bodyArray.forEach((otherBody) => {
+            if (otherBody != this)
+              if (this.isOverlapping(otherBody)) {
+                this.velY = -20;
+              }
+          });
+        }
+        this.body.height -= 1;
+      }
+
+      this.updateBody();
+
+      context.fillStyle = this.color;
+      context.fillRect(this.x, this.y, this.width, this.height);
+    }
+  }
+
+  let player1 = new Player(0, 0, 50, 70, 'green');
+  let player2 = new Player(60, 60, 50, 50, 'red');
+  let box1 = new Wall(200, 548, 100, 100, 'black');
+  let box2 = new Wall(400, 548, 100, 100, 'black');
+
+  GameUpdate = () => {
+    requestAnimationFrame(GameUpdate);
+
+    context.clearRect(0, 0, canvas.width, canvas.height);
+
+    player1.update();
+    player2.update();
+    box1.update();
+    box2.update();
+
+    document.onkeydown = function (event) {
+      if (event.keyCode === 39)	     // rightArrow
+        player1.keyRight = true;
+      else if (event.keyCode === 40) // downArrow
+        player1.keyDown = true;
+      else if (event.keyCode === 37) // leftArrow
+        player1.keyLeft = true;
+      else if (event.keyCode === 38) // upArrow
+        player1.keyUp = true;
+
+      if (event.keyCode === 68)	     // d
+        player2.keyRight = true;
+      else if (event.keyCode === 83) // s
+        player2.keyDown = true;
+      else if (event.keyCode === 65) // a
+        player2.keyLeft = true;
+      else if (event.keyCode === 87) // w
+        player2.keyUp = true;
+    }
+
+    document.onkeyup = function (event) {
+      if (event.keyCode === 39)      // rightArrow
+        player1.keyRight = false;
+      else if (event.keyCode === 40) // downArrow
+        player1.keyDown = false;
+      else if (event.keyCode === 37) // leftArrow
+        player1.keyLeft = false;
+      else if (event.keyCode === 38) // upArrow
+        player1.keyUp = false;
+
+      if (event.keyCode === 68)	     // d
+        player2.keyRight = false;
+      else if (event.keyCode === 83) // s
+        player2.keyDown = false;
+      else if (event.keyCode === 65) // a
+        player2.keyLeft = false;
+      else if (event.keyCode === 87) // w
+        player2.keyUp = false;
+    }
+
+    if (player1.isOverlapping(player2)) {
+      player1.color = 'blue';
+    } else {
+      player1.color = 'green';
+    }
+
+    console.log(countFPS());
+  }
+
+  window.countFPS = (function () {
+    var lastLoop = (new Date()).getMilliseconds();
+    var count = 1;
+    var fps = 0;
+
+    return function () {
+      var currentLoop = (new Date()).getMilliseconds();
+      if (lastLoop > currentLoop) {
+        fps = count;
+        count = 1;
+      } else {
+        count += 1;
+      }
+      lastLoop = currentLoop;
+      return fps;
+    };
+  }());
+
+  GameUpdate();
+</script>
